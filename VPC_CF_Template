@@ -1,0 +1,305 @@
+
+AWSTemplateFormatVersion: 2010-09-09
+Description: This Template helps you to create VPC 
+Parameters:
+  Stackname:
+      Description: the stack name is DefaultVPC
+      Type: String
+      Default: IN
+  CidrBlock:
+    Type: String
+    Description: Provide the Cidr
+  CidrPublicSubnetA:
+    Type: String
+    Description: Provide the Cidr
+  CidrPrivateSubnetA:
+    Type: String
+    Description: Provide the Cidr
+  CidrPublicSubnetB:
+    Type: String
+    Description: Provide the Cidr
+  CidrPrivateSubnetB:
+    Type: String
+    Description: Provide the Cidr
+  AvailabilityZoneA:
+    Type: String
+    Description: Provide the AvailabilityZone
+  AvailabilityZoneB:
+    Type: String
+    Description: Provide the AvailabilityZone
+Resources:
+  # First, a VPC:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref CidrBlock
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+      - Key: Name
+        Value:  IN-PrePro
+
+# Internet Gateway for VPC and !Ref parameter is used to fetch the name of VPC
+# Our VPC will need internet access:      
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    DependsOn: VPC
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    # Notice how you can't attach an IGW to a VPC unless both are created:
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+
+# Public and Private Subnets in AZ1
+
+  PublicSubnetA:
+      Type: AWS::EC2::Subnet
+      Properties:
+        VpcId: !Ref VPC
+        CidrBlock: !Ref CidrPublicSubnetA
+        AvailabilityZone: !Ref AvailabilityZoneA
+        Tags:
+        - Key: Name
+          Value: prod-1a-public
+
+  PrivateSubnetA:
+      Type: AWS::EC2::Subnet
+      Properties:
+        VpcId: !Ref VPC
+        CidrBlock: !Ref CidrPrivateSubnetA
+        AvailabilityZone: !Ref AvailabilityZoneA
+        Tags:
+        - Key: Name
+          Value: prod-1a-private
+
+# Public & Ｐrivate Subnet in other AZ2
+
+  PublicSubnetB:
+      Type: AWS::EC2::Subnet
+      Properties:
+        VpcId: !Ref VPC
+        CidrBlock: !Ref CidrPublicSubnetB
+        AvailabilityZone: !Ref AvailabilityZoneB
+        Tags:
+        - Key: Name
+          Value: prod-1b-public
+  
+  PrivateSubnetB:
+      Type: AWS::EC2::Subnet
+      Properties:
+        VpcId: !Ref VPC
+        CidrBlock: !Ref CidrPrivateSubnetB
+        AvailabilityZone: !Ref AvailabilityZoneB
+        Tags:
+        - Key: Name
+          Value: prod-1b-private
+# Now Create Public Route table and attach with Created Internet Gateway
+  PublicRouteTableA:
+      Type: AWS::EC2::RouteTable
+      Properties:
+        VpcId: !Ref VPC
+        Tags:
+        - Key: Name
+          Value: Public
+  PublicRouteA:   # Public route table has direct routing to IGW:
+      Type: AWS::EC2::Route
+      DependsOn: AttachGateway
+      Properties:
+        RouteTableId: !Ref PublicRouteTableA
+        DestinationCidrBlock: 0.0.0.0/0
+        GatewayId: !Ref InternetGateway
+  
+  PublicRouteTableB:
+      Type: AWS::EC2::RouteTable
+      Properties:
+        VpcId: !Ref VPC
+        Tags:
+        - Key: Name
+          Value: Public
+  PublicRouteB:   # Public route table has direct routing to IGW:
+      Type: AWS::EC2::Route
+      DependsOn: AttachGateway
+      Properties:
+        RouteTableId: !Ref PublicRouteTableB
+        DestinationCidrBlock: 0.0.0.0/0
+        GatewayId: !Ref InternetGateway
+
+# Now Create the Private Route Table and attach with Internet Gatway via NAT Gateway
+  PrivateRouteTableA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value: Private
+  PrivateRouteA:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableA
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  PrivateRouteTableB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value: Private
+  PrivateRouteB:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableB
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+# Attaching the Public Subnet with PublicRoute1 which is attached with Internet Gateway
+
+  PublicSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetA
+      RouteTableId: !Ref PublicRouteTableA
+  PrivateSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetA
+      RouteTableId: !Ref PrivateRouteTableA
+
+  PublicSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetB
+      RouteTableId: !Ref PublicRouteTableB
+  PrivateSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetB
+      RouteTableId: !Ref PrivateRouteTableB
+# A NAT Gateway for Private Subnet to ISP
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt ElasticIPAddress.AllocationId
+      SubnetId: !Ref PublicSubnetA 
+      Tags:
+      - Key: Name
+        Value: NAT Gateway
+# Create Elastic IP
+  ElasticIPAddress:
+      Type: AWS::EC2::EIP
+      Properties:
+        Domain: VPC
+
+# Creating Security Group
+  DefaultSecurityGroup:
+      Type: AWS::EC2::SecurityGroup
+      Properties:
+        GroupDescription: My Global Security Group
+        VpcId: !Ref VPC
+        SecurityGroupIngress:
+          - IpProtocol: tcp
+            FromPort: '22'
+            ToPort: '22'
+            CidrIp: 0.0.0.0/0
+          - IpProtocol: tcp
+            FromPort: '80'
+            ToPort: '80'
+            CidrIp: 0.0.0.0/0
+        SecurityGroupEgress:
+          - IpProtocol: tcp
+            FromPort: '22'
+            ToPort: '22'
+            CidrIp: 0.0.0.0/0
+          - IpProtocol: tcp
+            FromPort: '80'
+            ToPort: '80'
+            CidrIp: 0.0.0.0/0
+#Getting the outputs
+Outputs:
+  AvailZoneA: 
+    Value: !GetAtt PublicSubnetA.AvailabilityZone
+    Description: AvailabilityZone
+    Export:
+      Name: !Sub "${AWS::StackName}-AvailZoneA"
+
+  AvailZoneB: 
+    Value: !GetAtt PublicSubnetB.AvailabilityZone
+    Description: AvailabilityZone
+    Export:
+      Name: !Sub "${AWS::StackName}-AvailZoneB"
+
+  VPCName:
+    Value: !Ref VPC
+    Description: VPC Name
+    Export:
+      Name: !Sub "${AWS::StackName}-VPC"
+
+  PublicSubnetA:
+    Value: !Ref PublicSubnetA
+    Description: Public Subnet Name
+    Export:
+      Name: !Sub "${AWS::StackName}-PublicSubnetA"
+
+  PublicSubnetB:
+    Value: !Ref PublicSubnetB
+    Description: Public Subnet Name
+    Export:
+      Name: !Sub "${AWS::StackName}-PublicSubnetB"
+
+  PrivateSubnetA:
+    Value: !Ref PrivateSubnetA
+    Description: Private Subnet Name 
+    Export: 
+      Name: !Sub "${AWS::StackName}-PrivateSubnetA"
+  
+  PrivateSubnetB:
+    Value: !Ref PrivateSubnetB
+    Description: Private Subnet Name 
+    Export: 
+      Name: !Sub "${AWS::StackName}-PrivateSubnetB"
+
+  PublicRouteTableA:
+    Value: !Ref PublicRouteTableA
+    Description: Public Route Table Name
+    Export:
+      Name: !Sub "${AWS::StackName}-PublicRouteTableA"
+
+  PrivateRouteTableA:
+    Value: !Ref PrivateRouteTableA
+    Description: Private Route Table Name
+    Export:
+      Name: !Sub "${AWS::StackName}-PrivateRouteTableA"
+  
+  PublicRouteTableB:
+    Value: !Ref PublicRouteTableB
+    Description: Public Route Table Name
+    Export:
+      Name: !Sub "${AWS::StackName}-PublicRouteTableB"
+
+  PrivateRouteTableB:
+    Value: !Ref PrivateRouteTableB 
+    Description: Private Route Table Name
+    Export:
+      Name: !Sub "${AWS::StackName}-PrivateRouteTableB"
+
+  NatGatewayName:
+    Value: !Ref NatGateway
+    Description: NAT Gateway Name
+    Export:
+      Name: !Sub "${AWS::StackName}-NatGateway"
+  
+  ElasticIPAddressIP:
+    Value: !Ref ElasticIPAddress
+    Description: Elastic IP Address IP 
+    Export:
+      Name: !Sub "${AWS::StackName}-ElasticIPAddress"
+
+  DefaultSecuirtyGroupName:
+    Value: !Ref DefaultSecurityGroup
+    Description: Name of the Security Group
+    Export:
+      Name: !Sub "${AWS::StackName}-DefaultSecurityGroup"
